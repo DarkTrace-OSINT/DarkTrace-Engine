@@ -2,6 +2,7 @@ import os
 import time
 import requests
 from dotenv import load_dotenv
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 load_dotenv()
@@ -10,8 +11,9 @@ TOR_PROXY_URL = os.getenv("TOR_PROXY_URL", "socks5h://127.0.0.1:9050")
 class ForumMonitor:
 
 
-    def __init__(self, target_config):
+    def __init__(self, target_config, callback=None):
         self.target = target_config
+        self.callback = callback
         self.session = requests.Session()
 
         if self.target.get('use_tor',True):
@@ -74,13 +76,13 @@ class ForumMonitor:
                 if 'unread' in href or 'latest' in href or '#' in href:
                     continue
 
-                clean_link = href if href.startswith('http') else self.target["domain"] + href
+                clean_link = href if href.startswith('http') else urljoin(self.target["domain"], href)
 
                 new_posts.append(clean_link)
                 
             elif forum_type == "dark" and href.startswith('Thread-'):
 
-                clean_link = self.target["domain"] + "/" + href
+                clean_link = urljoin(self.target["domain"], href)
 
                 new_posts.append(clean_link)
 
@@ -90,6 +92,8 @@ class ForumMonitor:
     def scrape_post_html(self, post_url):
         html = self.get_page(post_url)
         if html:
+            if self.callback:
+                self.callback(post_url,html)
             time.sleep(2)
         return html
 
@@ -132,6 +136,6 @@ class ForumMonitor:
                         self.seen_urls.add(link)
                         self.scrape_post_html(link)
 
-                time.sleep(check_interval)
+            time.sleep(check_interval)
 
                 
