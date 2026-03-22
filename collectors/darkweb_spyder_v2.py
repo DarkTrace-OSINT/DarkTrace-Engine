@@ -1,141 +1,155 @@
 import os
 import time
+import logging
 import requests
+import re
+import json
 from dotenv import load_dotenv
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-load_dotenv()
-TOR_PROXY_URL = os.getenv("TOR_PROXY_URL", "socks5h://127.0.0.1:9050")
+from config.settings import TOR_PROXY_URL, TARGET_COOKIES
 
-class ForumMonitor:
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+LOG_FILE = os.path.join(LOG_DIR, 'spider_error.log')
 
+os.makedirs(LOG_DIR, exist_ok=True)
 
-    def __init__(self, target_config, callback=None):
-        self.target = target_config
-        self.callback = callback
+logger = logging.getLogger("DarkwebSpyder")
+logger.setLevel(logging.ERROR)
+file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+logger.addHandler(file_handler)
+
+class DarkwebSpyder:
+    def __init__(self, callback=None):
         self.session = requests.Session()
-
-        if self.target.get('use_tor',True):
-            self.session.proxies = {
-                "http" : TOR_PROXY_URL,
-                "https" : TOR_PROXY_URL
-            }
-
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/115.0"})
-        
-        if "cookies" in self.target:
-            self.session.cookies.update(self.target["cookies"])
-
         self.seen_urls = set()
+        self.callback = callback
 
+    def _log_error (self, error_code, site_id, message):
+        error_data = {
+            "error_code": error_code,
+            "site_id": site_id,
+            "message": message
+        }
+        print(f"[ERROR] {message}")
+        logger.error(json.dumps(error_data, ensure_ascii=False))
 
-    def assemble_url(self, page_num):
+    def setup_target(self, domain, is_onion):
+        self.session.cookies.clear()
+        self.session.proxies = {
+            "http": TOR_PROXY_URL,
+            "https": TOR_PROXY_URL
+        } if is_onion else {}
+        if domain in TARGET_COOKIES:
+            self.session.cookies.update(TARGET_COOKIES[domain])
 
-        base_url = self.target["base_url"]
-        forum_type = self.target["type"]
-
-        if page_num == 1:
-            return base_url
-        
-        if forum_type == "breach":
-            return f"{base_url.rstrip('/')}/page-{page_num}"
-        
-        elif forum_type == "dark":
-            return f"{base_url}?page={page_num}"
-        
-        return base_url
-    
-
-
-    def get_page(self, url):
-
+    def fetch_github_target(self):
         try:
-            resp = self.session.get(url, timeout=45)
+            url = "https://raw.githubusercontent.com/fastfire/deepdarkCTI/main/forum.md"
+            resp = requests.get(url, timeout=30)
             resp.raise_for_status()
-            return resp.text
-        except Exception as e:
-            print(f" * 접속 에러 ({url}): {e}")
-            return None
-        
-    
 
-
-    def extract_post_links(self, html):
-
-        soup = BeautifulSoup(html, 'html.parser')
-        new_posts = []
-        forum_type = self.target["type"]
-
-        for a_tag in soup.find_all('a', href=True):
-
-            href = a_tag['href']
-
-            if forum_type == "breach" and '/threads/' in href:
-
-                if 'unread' in href or 'latest' in href or '#' in href:
-                    continue
-
-                clean_link = href if href.startswith('http') else urljoin(self.target["domain"], href)
-
-                new_posts.append(clean_link)
+            target_list = []
+            for line in resp.text.splitlines():
                 
-            elif forum_type == "dark" and href.startswith('Thread-'):
-
-                clean_link = urljoin(self.target["domain"], href)
-
-                new_posts.append(clean_link)
-
-        return list(set(new_posts))
+                if "online" in line.lower():
+                    
+                    match = re.search(r"\[(.*?)\]\((.*?)\)", line)
+                    
+                    if match:
+                        name = match.group(1).strip()
+                        forum_url = match.group(2).strip()
+                        
+                        if forum_url.startswith("http"):
+                            domain = forum_url.split("/")[2]
+                            target_list.append({
+                                "name" : name,
+                                "base_url" : forum_url,
+                                "domain" : domain,
+                                "is_onion" : ".onion" in domain
+                            })
+                            
+            return target_list
+            
+        except Exception as e:
+            self._log_error("E000", "GitHub", f"타겟 리스트 갱신 실패 : {str(e)}")
+            return []
+        
+    def is_login_wall(self, html):
+        if not html: return True
+        html_lower = html.lower()
+        if "you must be logged in" in html_lower or "register to view" in html_lower or len(html) < 2000:
+            return True
+        return False
     
+    def find_target_board(self, base_url, domain):
+        try:
+            resp = self.session.get(base_url, timeout=45)
+            html = resp.text
+            if self.is_login_wall(html): return None
 
-    def scrape_post_html(self, post_url):
-        html = self.get_page(post_url)
-        if html:
-            if self.callback:
-                self.callback(post_url,html)
-            time.sleep(2)
-        return html
+            soup = BeautifulSoup(html, 'html.parser')
+            keywords = ['database', 'leak', 'dump', 'breach']
+            
+            for a_tag in soup.find_all('a', href=True):
+                href, text = a_tag['href'].lower(), a_tag.text.lower()
+                if any(kw in href or kw in text for kw in keywords):
+                    if 'action=lastpost' in href or 'unread' in href: continue
+                    return href if href.startswith('http') else urljoin(base_url, a_tag['href'])
+            return None
+        except Exception as e:
+            self._log_error("E001", domain, f"메인 접속 실패: {str(e)}")
+            return None
+
+    def _extract_post_links(self, html, board_url):
+            soup = BeautifulSoup(html, 'html.parser')
+            new_posts = []
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag['href']
+                if ('/threads/' in href) or (href.startswith('Thread-')):
+                    if 'unread' in href or 'latest' in href or '#' in href: continue
+                    
+                    clean_link = href if href.startswith('http') else urljoin(board_url, href)
+                    new_posts.append(clean_link)
+            return list(set(new_posts))      
 
 
+    def scrape_board(self, board_url, domain):
+        try:
+            resp = self.session.get(board_url, timeout=45)
+            html = resp.text
 
-    def initial_full_scan(self, max_pages_to_scan=10):
-        for page in range(1, max_pages_to_scan + 1):
-            target_url = self.assemble_url(page)
-            html = self.get_page(target_url)
-
-            if not html:
-                break
-
-            post_links = self.extract_post_links(html)
+            
+            post_links = self._extract_post_links(html, board_url)
             if not post_links:
-                break
+                print(f"      [-] {domain} 게시판에서 새로운 글을 찾지 못했습니다.")
+                return
 
-            for link in post_links:
-                if link not in self.seen_urls:
-                    self.seen_urls.add(link)
-                    self.scrape_post_html(link)
-            time.sleep(3)
+            for post_url in post_links:
+                if post_url not in self.seen_urls:
+                    self.seen_urls.add(post_url)
+                    try:
+                        print(f"[본문 진입] {post_url}")
+                        post_resp = self.session.get(post_url, timeout=45)
+                        post_html = post_resp.text
+
+                        if self.callback and post_html:
+                            self.callback(post_url, post_html)
+
+                        time.sleep(2)
+                    except Exception as inner_e:
+                        self._log_error("E003", domain, f"개별 게시글 수집 실패 ({post_url}): {str(inner_e)}")
+                        continue
+        except Exception as e:
+            self._log_error("E002", domain, f"게시판 스크래핑 실패: {str(e)}")
 
 
 
-    def start_monitoring(self, check_interval=300):
 
-        while True:
-            target_url = self.assemble_url(1)
-            html = self.get_page(target_url)
+                
 
-            if html:
-                new_post_links = self.extract_post_links(html)
-                found_new = False
-
-                for link in new_post_links:
-
-                    if link not in self.seen_urls:
-                        found_new = True
-                        self.seen_urls.add(link)
-                        self.scrape_post_html(link)
-
-            time.sleep(check_interval)
 
                 
