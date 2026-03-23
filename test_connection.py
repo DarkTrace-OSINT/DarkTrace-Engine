@@ -1,6 +1,8 @@
 """
 test_connection.py
-팀원 코드(darkweb_spyder)와 연결 테스트
+팀원 코드(darkweb_spyder)와 파서 연결 테스트
+
+실행: python test_connection.py
 """
 
 import sys
@@ -10,15 +12,12 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core.schemas import RawCollectedData
+from core.schemas import RawCollectedData, EngineStatus, CrawlerStatus
 from processors.parser import DataParser
 
 
 def memory_parser(url, raw_html):
-    """
-    팀원 코드에서 호출되는 콜백 함수
-    수집된 HTML을 파싱하여 JSON으로 저장
-    """
+    """팀원 코드에서 호출되는 콜백 함수"""
     
     print("\n" + "=" * 60)
     print(f"[수집 완료] {url}")
@@ -37,6 +36,10 @@ def memory_parser(url, raw_html):
         print(f"   작성자: {sj.get('author', 'N/A')}")
         print(f"   키워드: {sj.get('keywords_found', [])}")
         
+        stats = sj.get('stats', {})
+        print(f"   텍스트 길이: {stats.get('text_length', 0):,}")
+        print(f"   키워드 수: {stats.get('keyword_count', 0)}")
+        
         # 결과 저장
         os.makedirs('data', exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -46,6 +49,14 @@ def memory_parser(url, raw_html):
             json.dump(parsed_data.to_dict(), f, ensure_ascii=False, indent=2)
         
         print(f"[저장됨] {filename}")
+        
+        # 8번 API 형식 출력 (rawText는 미리보기만)
+        print(f"\n[8번 API 형식] POST /api/v1/ingestion/raw")
+        print("{")
+        print(f'  "siteId": {raw_data.site_id},')
+        print(f'  "rawText": "(HTML {len(raw_html):,} bytes - 생략)",')
+        print(f'  "collectedAt": "{raw_data.collected_at.strftime("%Y-%m-%d %H:%M:%S")}"')
+        print("}")
         
     except Exception as e:
         print(f"[파싱 실패] {e}")
@@ -76,6 +87,8 @@ def run_spyder_test():
         print(f"[클리어넷] {len(clearnet)}개")
         
         success = False
+        target_name = ""
+        
         for i, target in enumerate(clearnet[:5]):
             print(f"\n[시도 {i+1}] {target['name']} ({target['domain']})")
             
@@ -84,15 +97,31 @@ def run_spyder_test():
             
             if board:
                 print(f"[게시판 발견] {board}")
+                target_name = target['name']
                 spyder.scrape_board(board, target['domain'])
                 success = True
                 break
             else:
                 print(f"[스킵] 게시판 없음")
         
+        # 6번 API 형식 출력
+        print("\n" + "=" * 60)
+        print("[6번 API 형식] POST /api/v1/system/engines")
+        print("{")
+        print('  "engines": [')
+        print("    {")
+        print(f'      "siteId": 1,')
+        print(f'      "sourceName": "{target_name if target_name else "Unknown"}",')
+        print(f'      "crawlerStatus": "{"ALIVE" if success else "ERROR"}"')
+        print("    }")
+        print("  ]")
+        print("}")
+        
         if not success:
             print("\n[결과] 게시판을 찾지 못했습니다.")
         
+    except ImportError:
+        print("[오류] collectors/darkweb_spyder_v2.py 필요")
     except Exception as e:
         print(f"[오류] {e}")
     
