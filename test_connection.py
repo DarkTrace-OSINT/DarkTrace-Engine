@@ -1,8 +1,6 @@
 """
 test_connection.py
 팀원 코드(darkweb_spyder)와 파서 연결 테스트
-
-실행: python test_connection.py
 """
 
 import sys
@@ -23,7 +21,10 @@ def memory_parser(url, raw_html):
     print(f"[수집 완료] {url}")
     print(f"[HTML 크기] {len(raw_html):,} bytes")
     
+    # 1. RawCollectedData 생성
     raw_data = RawCollectedData(site_id=1, raw_text=raw_html)
+    
+    # 2. 파서로 처리
     parser = DataParser(site_id=1)
     
     try:
@@ -34,28 +35,35 @@ def memory_parser(url, raw_html):
         
         sj = parsed_data.structured_json
         print(f"   작성자: {sj.get('author', 'N/A')}")
-        print(f"   키워드: {sj.get('keywords_found', [])}")
         
         stats = sj.get('stats', {})
         print(f"   텍스트 길이: {stats.get('text_length', 0):,}")
-        print(f"   키워드 수: {stats.get('keyword_count', 0)}")
         
         # 결과 저장
         os.makedirs('data', exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"data/parsed_{timestamp}.json"
         
+        result = {
+            "raw_id": parsed_data.raw_id,
+            "leak_title": parsed_data.leak_title,
+            "clean_content": parsed_data.clean_content[:500] + "..." if len(parsed_data.clean_content) > 500 else parsed_data.clean_content,
+            "structured_json": parsed_data.structured_json,
+            "parsed_at": parsed_data.parsed_at.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(parsed_data.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
         
         print(f"[저장됨] {filename}")
         
-        # 8번 API 형식 출력 (rawText는 미리보기만)
+        # 8번 API 형식 출력 (팀장님 수정 버전)
         print(f"\n[8번 API 형식] POST /api/v1/ingestion/raw")
+        api_format = parsed_data.to_api_format(site_id=1)
         print("{")
-        print(f'  "siteId": {raw_data.site_id},')
-        print(f'  "rawText": "(HTML {len(raw_html):,} bytes - 생략)",')
-        print(f'  "collectedAt": "{raw_data.collected_at.strftime("%Y-%m-%d %H:%M:%S")}"')
+        print(f'  "siteId": {api_format["siteId"]},')
+        print(f'  "rawText": "(정제된 텍스트 {len(api_format["rawText"]):,} bytes)",')
+        print(f'  "collectedAt": "{api_format["collectedAt"]}"')
         print("}")
         
     except Exception as e:
@@ -116,9 +124,6 @@ def run_spyder_test():
         print("    }")
         print("  ]")
         print("}")
-        
-        if not success:
-            print("\n[결과] 게시판을 찾지 못했습니다.")
         
     except ImportError:
         print("[오류] collectors/darkweb_spyder_v2.py 필요")
