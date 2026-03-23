@@ -1,11 +1,6 @@
-"""
-core/schemas.py
-Pydantic DTO - 팀장님 지시: frozen=True
-"""
-
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from enum import Enum
 
 
@@ -18,59 +13,44 @@ class ProcessStatus(str, Enum):
 class CrawlerStatus(str, Enum):
     ALIVE = "ALIVE"
     DEAD = "DEAD"
-    ERROR = "ERROR"
 
 
 class RawCollectedData(BaseModel):
-    """3번이 주는 Raw 데이터"""
-    
-    site_id: int = Field(..., description="사이트 ID")
-    raw_text: str = Field(..., description="HTML 등 원본 텍스트")
+    site_id: int
+    raw_text: str
     collected_at: datetime = Field(default_factory=datetime.now)
-    process_status: ProcessStatus = Field(default=ProcessStatus.PENDING)
     
     class Config:
         frozen = True
-    
-    def to_api_format(self) -> dict:
-        """8번 API 형식"""
-        return {
-            "siteId": self.site_id,
-            "rawText": self.raw_text,
-            "collectedAt": self.collected_at.strftime("%Y-%m-%d %H:%M:%S")
-        }
 
 
 class ParsedThreatData(BaseModel):
-    """네가 만드는 가공 데이터"""
-    
-    raw_id: int = Field(default=0)
+    raw_id: int = 0
     leak_title: Optional[str] = None
+    clean_content: str  # [추가] 태그가 제거된 깨끗한 텍스트
     structured_json: Dict[str, Any] = Field(default_factory=dict)
     parsed_at: datetime = Field(default_factory=datetime.now)
     
     class Config:
         frozen = True
-    
-    def to_dict(self) -> dict:
+
+    def to_api_format(self, site_id: int) -> dict:
+        """API 8번 규격에 100% 맞춤"""
         return {
-            "raw_id": self.raw_id,
-            "leak_title": self.leak_title,
-            "structured_json": self.structured_json,
-            "parsed_at": self.parsed_at.strftime("%Y-%m-%d %H:%M:%S")
+            "siteId": site_id,
+            "rawText": self.clean_content,  # 정제된 텍스트 전송
+            "collectedAt": self.parsed_at.strftime("%Y-%m-%d %H:%M:%S")
         }
 
 
 class EngineStatus(BaseModel):
-    """6번 API용"""
-    
     site_id: int
     source_name: str
     crawler_status: CrawlerStatus = CrawlerStatus.ALIVE
     
     class Config:
         frozen = True
-    
+
     def to_api_format(self) -> dict:
         return {
             "siteId": self.site_id,
