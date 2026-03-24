@@ -1,11 +1,35 @@
 import threading
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
 
-def memory_parser(url, raw_html):
+def memory_parser(url, raw_html, site_id=1): # site_id를 인자로 받게 수정
     print("=" * 50)
-    print(f"🎯 [수집 완료] {url}")
-    print(f"📦 [HTML 크기] {len(raw_html)} bytes")
-    print(f"📝 [미리보기] {raw_html[:200]}...") # 앞부분 200글자만 잘라서 보여줌
+    print(f" [수집 완료] {url}")
+    print(f" [HTML 크기] {len(raw_html)} bytes")
+
+    try:
+        # 1. Raw 데이터 객체 생성
+        raw_data = RawCollectedData(
+            site_id=site_id,
+            raw_text=raw_html
+        )
+
+        # 2. 파서 실행 (HTML -> 가공된 텍스트)
+        parser = DataParser(site_id=site_id)
+        parsed = parser.parse_html(raw_data)
+
+        # 3. 결과 확인용 출력
+        print(f" [파싱 성공] 제목: {parsed.leak_title}")
+        print(f" [파싱 성공] 본문 길이: {len(parsed.clean_content)}")
+
+        # 4. API 전송용 데이터 생성 (여기에 나중에 requests.post 넣으면 끝!)
+        api_data = parsed.to_api_format(site_id=site_id)
+
+        return api_data
+
+    except Exception as e:
+        print(f" ❌ 파싱 실패 ({url}): {e}")
+        return None
+
     print("=" * 50 + "\n")
 
 def run_spider():
