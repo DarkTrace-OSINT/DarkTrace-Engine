@@ -1,5 +1,7 @@
 import threading
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
+from processors.parser import DataParser
+from core.schemas import RawCollectedData
 
 def memory_parser(url, raw_html, site_id=1): # site_id를 인자로 받게 수정
     print("=" * 50)
