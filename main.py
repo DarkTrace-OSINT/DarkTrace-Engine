@@ -1,3 +1,22 @@
+import requests
+import json
+from datetime import datetime
+
+# [8번] API 서버 주소 (실제 주소로 수정 필요)
+API_URL = "http://서버아이피:포트/api/v1/ingestion/raw"
+
+def send_to_server(user_id, user_email, user_pw):
+    """류재연(4번)이 분석한 규격으로 데이터를 포장해서 전송하는 함수"""
+    payload = {
+        "siteId": 1,
+        "rawText": f"ID: {user_id} | Email: {user_email} | PW: {user_pw}", # 2번 분석 내용 반영
+        "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    try:
+        response = requests.post(API_URL, json=payload)
+        print(f"📡 [서버 전송] 상태: {response.status_code}")
+    except Exception as e:
+        print(f"❌ [전송 실패] 에러: {e}")
 import threading
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
 from processors.parser import DataParser
