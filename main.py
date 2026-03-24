@@ -1,41 +1,104 @@
 import threading
+import time
+import json
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
+from core.sender import DataSender
 
-def memory_parser(url, raw_html):
-    print("=" * 50)
-    print(f"🎯 [수집 완료] {url}")
-    print(f"📦 [HTML 크기] {len(raw_html)} bytes")
-    print(f"📝 [미리보기] {raw_html[:200]}...") # 앞부분 200글자만 잘라서 보여줌
-    print("=" * 50 + "\n")
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
-def run_spider():
-    print("엔진 시작")
+logger = logging.getLogger("DarkTrace_Main")
 
-    spyder = DarkwebSpyder(callback=memory_parser)
 
-    targets = spyder.fetch_github_target()
-    if not targets:
-        print("타겟 없음")
-        return
+total_scraped_count = 0
+counter_lock = threading.Lock()
+api_sender = DataSender()
+
+
+def memory_parser(domain, url, raw_html):
+    global total_scraped_count
+    with counter_lock:
+        total_scraped_count += 1
+
+    try:
+        data = json.loads(raw_html)
+        source = data.get("_source", {})
+        u_id = source.get("username", "N/A")    
+        u_email = source.get("email", "N/A")   
+        u_pw = source.get("password", "N/A")    
+
+        formatted_text = f"ID: {u_id} | Email: {u_email} | PW: {u_pw}"
+
+        api_sender.send_raw_data(site_id=1, raw_text=formatted_text)
+
+        if total_scraped_count % 100 == 0:
+            logger.info(f"누적 {total_scraped_count}개 수집 및 전송 완료")
     
-    print(f"[*] 확보된 Online 타겟: {len(targets)}개\n")
-    for target in targets[:3]: 
-        domain = target["domain"]
-        print(f"[+] 타겟 분석 시작: {target['name']} ({domain})")
-        
+    except json.JSONDecodeError:
+        api_sender.send_raw_data(site_id=1, raw_text=raw_html)
+    except Exception as e:
+        logger.error(f"데이터 파싱 오류 ({url}): {e}")
+
+
+def process_target(target):
+    spyder = DarkwebSpyder(callback=memory_parser) 
+    domain = target["domain"]
+    
+    try:
         spyder.setup_target(domain, target["is_onion"])
         board_url = spyder.find_target_board(target["base_url"], domain)
 
-        if not board_url:
-            print(f"  ⏭️ [Skip] 유효한 게시판을 찾지 못해 건너뜁니다.\n")
-            continue
+        if board_url:
+            spyder.scrape_board(board_url, domain)
 
-        print(f"  🎯 타겟 게시판 확정: {board_url}")
+    except Exception as e:
+        logger.error(f"타겟 처리 실패 ({domain}): {e}")
+    finally:
+        spyder.session.close()
 
-        spyder.scrape_board(board_url, target["domain"])
 
+def heartbeat_daemon():
+    while True:
+        api_sender.send_engine_status(site_id=1, source_name="DarkTrace_Main", status="ALIVE")
+        time.sleep(300)
+
+
+def run_spider():
+    logger.info("오픈데이터 수집 시작")
+    
+    master_spyder = DarkwebSpyder()
+    targets = master_spyder.fetch_github_target()
+
+    if not targets:
+        logger.warning("타겟을 찾을 수 없습니다. (GitHub 리스트 확인)")
+        return
+    
+    logger.info(f"확보된 고유 타겟: {len(targets)}개 (20개 스레드 투입)")
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = [executor.submit(process_target, target) for target in targets]
+        for future in as_completed(futures):
+            try:
+                future.result() 
+            except Exception:
+                pass
+                
+    logger.info("모든 타겟 스캔 완료. 엔진 대기 모드 진입.")
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_spider)
-    t.start()
-    t.join()
+    daemon_thread = threading.Thread(target=heartbeat_daemon, daemon=True)
+    daemon_thread.start()
+
+    try:
+        run_spider() 
+    except KeyboardInterrupt:
+        logger.warning("사용자에 의해 스캔이 강제 종료되었습니다.")
+        api_sender.send_engine_status(site_id=1, source_name="DarkTrace_Main", status="DEAD")
+        os._exit(1)
