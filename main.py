@@ -22,37 +22,28 @@ from collectors.darkweb_spyder_v2 import DarkwebSpyder
 from processors.parser import DataParser
 from core.schemas import RawCollectedData
 
-def memory_parser(url, raw_html, site_id=1): # site_id를 인자로 받게 수정
-    print("=" * 50)
-    print(f" [수집 완료] {url}")
-    print(f" [HTML 크기] {len(raw_html)} bytes")
+def memory_parser(url, raw_html):
+    print(f"📥 데이터 분석 시작: {url}")
 
     try:
-        # 1. Raw 데이터 객체 생성
-        raw_data = RawCollectedData(
-            site_id=site_id,
-            raw_text=raw_html
-        )
+        # 1. 텍스트를 JSON 객체로 변환
+        import json
+        data = json.loads(raw_html)
+        
+        # 2. 질문자님이 분석한 '키(Key)'를 이용해 값 추출
+        source = data.get("_source", {})
+        u_id = source.get("username", "N/A")    # ID 추출
+        u_email = source.get("email", "N/A")   # Email 추출
+        u_pw = source.get("password", "N/A")    # PW 추출 (BCrypt 해시)
 
-        # 2. 파서 실행 (HTML -> 가공된 텍스트)
-        parser = DataParser(site_id=site_id)
-        parsed = parser.parse_html(raw_data)
-
-        # 3. 결과 확인용 출력
-        print(f" [파싱 성공] 제목: {parsed.leak_title}")
-        print(f" [파싱 성공] 본문 길이: {len(parsed.clean_content)}")
-
-        # 4. API 전송용 데이터 생성 (여기에 나중에 requests.post 넣으면 끝!)
-        api_data = parsed.to_api_format(site_id=site_id)
-
-        return api_data
+        # 3. 분석된 데이터를 출력 (확인용)
+        print(f"✅ 분석 완료 - ID: {u_id}, Email: {u_email}")
+        
+        # 상단에 정의해둔 전송 함수 호출
+        send_to_server(u_id, u_email, u_pw)
 
     except Exception as e:
-        print(f" ❌ 파싱 실패 ({url}): {e}")
-        return None
-
-    print("=" * 50 + "\n")
-
+        print(f"❌ [4번 역할 오류] 데이터 분석 중 에러 발생: {e}")
 def run_spider():
     print("엔진 시작")
 
