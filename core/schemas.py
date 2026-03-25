@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from typing import Optional, Dict, Any
 from enum import Enum
@@ -16,40 +16,42 @@ class CrawlerStatus(str, Enum):
 
 
 class RawCollectedData(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     site_id: int
     raw_text: str
     collected_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        frozen = True
+ 
 
 
 class ParsedThreatData(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     raw_id: int = 0
     leak_title: Optional[str] = None
-    clean_content: str  # [추가] 태그가 제거된 깨끗한 텍스트
+    clean_content: str  
     structured_json: Dict[str, Any] = Field(default_factory=dict)
     parsed_at: datetime = Field(default_factory=datetime.now)
     
-    class Config:
-        frozen = True
+ 
 
     def to_api_format(self, site_id: int) -> dict:
-        """API 8번 규격에 100% 맞춤"""
+        
         return {
             "siteId": site_id,
-            "rawText": self.clean_content,  # 정제된 텍스트 전송
+            "rawText": self.clean_content,  
             "collectedAt": self.parsed_at.strftime("%Y-%m-%d %H:%M:%S")
         }
 
 
 class EngineStatus(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     site_id: int
     source_name: str
     crawler_status: CrawlerStatus = CrawlerStatus.ALIVE
     
-    class Config:
-        frozen = True
 
     def to_api_format(self) -> dict:
         return {
@@ -60,5 +62,5 @@ class EngineStatus(BaseModel):
 
 
 class ParsingError(Exception):
-    """파싱 오류"""
+    
     pass
