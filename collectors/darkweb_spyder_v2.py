@@ -2,13 +2,14 @@ import os
 import time
 import logging
 import requests
+import random
 import re
 import json
 from dotenv import load_dotenv
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-from config.settings import TOR_PROXY_URL, TARGET_COOKIES
+from config.settings import TOR_PROXY_LIST, TARGET_LIST_URL
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(BASE_DIR, 'logs')
@@ -39,20 +40,22 @@ class DarkwebSpyder:
 
     def setup_target(self, domain, is_onion):
         self.session.cookies.clear()
-        self.session.proxies = {
-            "http": TOR_PROXY_URL,
-            "https": TOR_PROXY_URL
-        } if is_onion else {}
-        if domain in TARGET_COOKIES:
-            self.session.cookies.update(TARGET_COOKIES[domain])
+        if is_onion:
+            selected_proxy = random.choice(TOR_PROXY_LIST)
+            self.session.proxies = {"http": selected_proxy, "https": selected_proxy}
+        
+        else:
+            self.session.proxies = {}
 
     def fetch_github_target(self):
         try:
-            url = "https://raw.githubusercontent.com/fastfire/deepdarkCTI/main/forum.md"
-            resp = requests.get(url, timeout=30)
+            resp = requests.get(TARGET_LIST_URL, timeout=30)
             resp.raise_for_status()
 
             target_list = []
+            seen_domain = set()
+            seen_names = set()
+
             for line in resp.text.splitlines():
                 
                 if "online" in line.lower():
@@ -65,6 +68,19 @@ class DarkwebSpyder:
                         
                         if forum_url.startswith("http"):
                             domain = forum_url.split("/")[2]
+
+                            if domain in seen_domain:
+                                continue
+                            
+                            core_name = re.sub(r'\(.*?\)', '', name).lower()
+                            core_name = re.sub(r'[^a-z0-9]', '', core_name)
+
+                            if core_name in seen_names:
+                                continue
+
+                            seen_domain.add(domain)
+                            seen_names.add(core_name)
+
                             target_list.append({
                                 "name" : name,
                                 "base_url" : forum_url,
@@ -125,19 +141,19 @@ class DarkwebSpyder:
             
             post_links = self._extract_post_links(html, board_url)
             if not post_links:
-                print(f"      [-] {domain} 게시판에서 새로운 글을 찾지 못했습니다.")
+                
                 return
 
             for post_url in post_links:
                 if post_url not in self.seen_urls:
                     self.seen_urls.add(post_url)
                     try:
-                        print(f"[본문 진입] {post_url}")
+                        
                         post_resp = self.session.get(post_url, timeout=45)
                         post_html = post_resp.text
 
                         if self.callback and post_html:
-                            self.callback(post_url, post_html)
+                            self.callback(domain, post_url, post_html)
 
                         time.sleep(2)
                     except Exception as inner_e:
@@ -146,7 +162,28 @@ class DarkwebSpyder:
         except Exception as e:
             self._log_error("E002", domain, f"게시판 스크래핑 실패: {str(e)}")
 
+    def send_to_backend(self, post_url, domain, html):
+            
+            target_url = "https://unpercipient-woodrow-nonrecurent.ngrok-free.dev/api/v1/ingestion/data"
+            
+            headers = {
+                "ngrok-skip-browser-warning": "69420" 
+            }
+            
+            payload = {
+                "indicatorValue": post_url,
+                "sourceName": domain,
+                "rawContent": html[:5000]
+            }
+            
+            try:
+                
+                response = requests.post(target_url, json=payload, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    print("전송 성공")
 
+            except Exception as e:
+                print("전송 에러")
 
 
                 
