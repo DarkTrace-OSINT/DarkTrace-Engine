@@ -29,6 +29,10 @@ class DarkwebSpyder:
         self.seen_urls = set()
         self.callback = callback
 
+        self.max_seen_urls = 10000
+        self.sleep_min = 1.5
+        self.sleep_max = 3.5
+
     def _log_error (self, error_code, site_id, message):
         error_data = {
             "error_code": error_code,
@@ -49,7 +53,7 @@ class DarkwebSpyder:
 
     def fetch_github_target(self):
         try:
-            resp = requests.get(TARGET_LIST_URL, timeout=30)
+            resp = self.session.get(TARGET_LIST_URL, timeout=30)
             resp.raise_for_status()
 
             target_list = []
@@ -141,8 +145,10 @@ class DarkwebSpyder:
             
             post_links = self._extract_post_links(html, board_url)
             if not post_links:
-                
                 return
+            
+            if len(self.seen_urls) > self.max_seen_urls:
+                self.seen_urls.clear()
 
             for post_url in post_links:
                 if post_url not in self.seen_urls:
@@ -155,7 +161,7 @@ class DarkwebSpyder:
                         if self.callback and post_html:
                             self.callback(domain, post_url, post_html)
 
-                        time.sleep(2)
+                        time.sleep(random.uniform(self.sleep_min, self.sleep_max))
                     except Exception as inner_e:
                         self._log_error("E003", domain, f"개별 게시글 수집 실패 ({post_url}): {str(inner_e)}")
                         continue

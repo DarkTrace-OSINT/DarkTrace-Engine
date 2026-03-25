@@ -1,26 +1,18 @@
 from bs4 import BeautifulSoup
 from datetime import datetime
-from typing import Optional, Dict, Any
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Optional
 
 from core.schemas import RawCollectedData, ParsedThreatData, ParsingError
 
 
 class DataParser:
-    """
-    HTML 파서
-    - 엔진의 역할: HTML 태그 제거 및 데이터 구조화 (전처리)
-    - 백엔드 (Java)의 역할: 키워드 매칭 및 정밀 위협 정보(ID:PW) 추출
-    """
+
     
     def __init__(self, site_id: int):
         self.site_id = site_id
 
     def parse_html(self, raw_data: RawCollectedData) -> ParsedThreatData:
-        """HTML -> 가공된 텍스트로 변환하여 서버에 전달 준비"""
+        
         try:
             soup = BeautifulSoup(raw_data.raw_text, 'html.parser')
             

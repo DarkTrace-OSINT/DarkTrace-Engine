@@ -1,17 +1,11 @@
 import requests
 import logging
-from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from config.settings import API_BASE_URL, API_JWT_TOKEN
+from config.settings import API_BASE_URL, API_INGESTION_KEY
+from core.schemas import EngineStatus, CrawlerStatus
 
 logger = logging.getLogger("DarkTrace_Sender")
 
-
-class RawDataPayload(BaseModel):
-    model_config = ConfigDict(frozen=True)
-    siteId: int
-    rawText: str
-    collectedAt: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 class DataSender:
@@ -22,21 +16,24 @@ class DataSender:
         self.session.headers.update({
             "ngrok-skip-browser-warning": "69420",
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {API_JWT_TOKEN}"
+            "X-API-KEY": API_INGESTION_KEY
         })
 
     def send_raw_data(self, site_id: int, raw_text: str) -> bool:
         url = f"{self.base_url}/api/v1/ingestion/raw"
-        payload = RawDataPayload(siteId=site_id, rawText=raw_text[:5000])
+
+        payload = {
+            "siteId": site_id,
+            "rawText": raw_text[:5000],
+            "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
         try:
-            resp = self.session.post(url, json=payload.model_dump(), timeout=10)
-            if resp.status_code == 200:
-                return True
-            
-
-            logger.warning(f"[API 8번 전송 실패] 서버 응답 코드: {resp.status_code}")
-            return False
+            resp = self.session.post(url, json=payload, timeout=10)
+            if resp.status_code != 200:
+                logger.warning(f"[API 8번 전송 실패] 서버 응답 코드: {resp.status_code}")
+                return False
+            return True
         
         except Exception as e:
             logger.error(f"[API 8번 연결 에러] 백엔드 연결 불가: {e}")
@@ -45,17 +42,20 @@ class DataSender:
     def send_engine_status(self, site_id: int, source_name: str, status: str = "ALIVE") -> bool:
         
         url = f"{self.base_url}/api/v1/system/engines"
-        payload = {
-            "engines": [{"siteId": site_id, "sourceName": source_name, "crawlerStatus": status}]
-        }
+        engine_stat = EngineStatus(
+            site_id=site_id, 
+            source_name=source_name, 
+            crawler_status=CrawlerStatus(status)
+        )
+        
+        payload = {"engines": [engine_stat.to_api_format()]}
         
         try:
             resp = self.session.post(url, json=payload, timeout=5)
-            if resp.status_code == 200:
-                return True
-                
-            logger.warning(f"[API 6번 신고 실패] 서버 응답 코드: {resp.status_code}")
-            return False
+            if resp.status_code != 200:
+                logger.warning(f"[API 6번 신고 실패] 서버 응답 코드: {resp.status_code}")
+                return False
+            return True
             
         except Exception:
             return False

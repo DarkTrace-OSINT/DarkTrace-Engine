@@ -7,6 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
 from core.sender import DataSender
+from core.schemas import RawCollectedData
+from processors.parser import DataParser
+
 
 logging.basicConfig(
     level=logging.INFO, 
@@ -15,6 +18,10 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("DarkTrace_Main")
+
+DEFAULT_SITE_ID = 1
+MAX_WORKERS = 20
+HEARTBEAT_INTERVAL = 300
 
 
 total_scraped_count = 0
@@ -42,9 +49,21 @@ def memory_parser(domain, url, raw_html):
             logger.info(f"누적 {total_scraped_count}개 수집 및 전송 완료")
     
     except json.JSONDecodeError:
-        api_sender.send_raw_data(site_id=1, raw_text=raw_html)
-    except Exception as e:
-        logger.error(f"데이터 파싱 오류 ({url}): {e}")
+       
+        try:
+            raw_data = RawCollectedData(site_id=DEFAULT_SITE_ID, raw_text=raw_html)
+            parser = DataParser(site_id=DEFAULT_SITE_ID)
+            parsed_data = parser.parse_html(raw_data)
+
+            api_sender.send_raw_data(site_id=DEFAULT_SITE_ID, raw_text=parsed_data.clean_content)
+
+        except Exception as parse_e:
+            logger.error(f"HTML 파싱 오류 ({url}): {parse_e}")
+
+            api_sender.send_raw_data(site_id=DEFAULT_SITE_ID, raw_text=raw_html)
+
+        if total_scraped_count % 100 == 0:
+            logger.info(f"누적 {total_scraped_count}개 수집 및 정제 전송 완료")
 
 
 def process_target(target):
@@ -66,8 +85,8 @@ def process_target(target):
 
 def heartbeat_daemon():
     while True:
-        api_sender.send_engine_status(site_id=1, source_name="DarkTrace_Main", status="ALIVE")
-        time.sleep(300)
+        api_sender.send_engine_status(site_id=DEFAULT_SITE_ID, source_name="DarkTrace_Main", status="ALIVE")
+        time.sleep(HEARTBEAT_INTERVAL)
 
 
 def run_spider():
@@ -82,7 +101,7 @@ def run_spider():
     
     logger.info(f"확보된 고유 타겟: {len(targets)}개 (20개 스레드 투입)")
 
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_target, target) for target in targets]
         for future in as_completed(futures):
             try:
@@ -100,5 +119,5 @@ if __name__ == "__main__":
         run_spider() 
     except KeyboardInterrupt:
         logger.warning("사용자에 의해 스캔이 강제 종료되었습니다.")
-        api_sender.send_engine_status(site_id=1, source_name="DarkTrace_Main", status="DEAD")
+        api_sender.send_engine_status(site_id=DEFAULT_SITE_ID, source_name="DarkTrace_Main", status="DEAD")
         os._exit(1)
