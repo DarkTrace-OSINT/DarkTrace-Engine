@@ -1,6 +1,7 @@
 import requests
 import os
 import logging
+import json
 from datetime import datetime
 from config.settings import API_BASE_URL, API_INGESTION_KEY
 from core.schemas import EngineStatus, CrawlerStatus
@@ -32,12 +33,28 @@ class DataSender:
             "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
+        # debug_payload = payload.copy()
+        # debug_payload["rawText"] = debug_payload["rawText"][:100] + " ... (생략)"
+        # print(f"\n📦 [{source_name}] 전송 직전 데이터 미리보기:")
+        # print(json.dumps(debug_payload, ensure_ascii=False, indent=2))
+
         try:
             resp = self.session.post(url, json=payload, timeout=30)
-            if resp.status_code != 200:
-                logger.warning(f"[API 8번 전송 실패] 서버 응답 코드: {resp.status_code}")
+            try:
+                resp_json = resp.json()
+            except:
+                resp_json = {}
+
+            
+            if resp.status_code == 200 and resp_json.get("code") == "SUCCESS":
+                ingest_id = resp_json.get("data", {}).get("ingestId", "알수없음")
+                print(f"✅ [전송 완벽 성공] ID: {ingest_id} | URL: {indicator_value}")
+                return True
+            else:
+                
+                print(f"❌ [전송 튕김] 👉 서버 거절 사유: {resp.text}")
+                logger.warning(f"[API 8번 전송 실패] 서버 응답: {resp.text}")
                 return False
-            return True
         
         except Exception as e:
             logger.error(f"[API 8번 연결 에러] 백엔드 연결 불가: {e}")

@@ -139,7 +139,12 @@ if __name__ == "__main__":
     daemon_thread.start()
 
     try:
-        run_spider() 
+        while True: 
+            logger.info(f"[{datetime.now()}] 새 수집 사이클을 시작")
+            run_spider() 
+            logger.info("모든 타겟 스캔 완료. 10분간 엔진 냉각 후 다시 시작")
+            time.sleep(600) 
+            
     except KeyboardInterrupt:
         logger.warning("사용자에 의해 스캔이 강제 종료되었습니다.")
         api_sender.send_engine_status(site_id=DEFAULT_SITE_ID, source_name="DarkTrace_Main", status="DEAD")

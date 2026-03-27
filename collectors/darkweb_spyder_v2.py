@@ -195,14 +195,24 @@ class DarkwebSpyder:
                 "rawText": html[:5000], 
                 "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            
+            print("\n📦 [서버로 쏘기 직전 실제 데이터 내용물]")
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            print("-" * 50)
             try:
-                
                 response = requests.post(target_url, json=payload, headers=headers, timeout=30)
-                if response.status_code == 200:
-                    print("전송 성공")
+
+                try:
+                    resp_json = response.json()
+                except:
+                    resp_json = {}
+                if response.status_code == 200 and resp_json.get("code") == "SUCCESS":
+                    ingest_id = resp_json.get("data", {}).get("ingestId", "알수없음")
+                    print(f"✅ [전송 완벽 성공] ID: {ingest_id} | 사이트: {domain}")
                 else:
-                    print(f"전송 실패 (상태 코드: {response.status_code})")
+                    
+                    print(f"❌ [전송 거절됨] 사이트: {domain}")
+                    print(f"   👉 서버 응답: {response.text}")
+                    self._log_error("E004", domain, f"백엔드 수신 거절: {response.text}")
             except Exception as e:
                 print(f"전송 에러: {e}")
 
