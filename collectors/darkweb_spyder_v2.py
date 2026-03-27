@@ -5,8 +5,9 @@ import requests
 import random
 import re
 import json
+from datetime import datetime
 from dotenv import load_dotenv
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from config.settings import TOR_PROXY_LIST, TARGET_LIST_URL
@@ -20,6 +21,10 @@ os.makedirs(LOG_DIR, exist_ok=True)
 logger = logging.getLogger("DarkwebSpyder")
 logger.setLevel(logging.ERROR)
 file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+
+formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+file_handler.setFormatter(formatter)
+
 logger.addHandler(file_handler)
 
 class DarkwebSpyder:
@@ -30,8 +35,8 @@ class DarkwebSpyder:
         self.callback = callback
 
         self.max_seen_urls = 10000
-        self.sleep_min = 1.5
-        self.sleep_max = 3.5
+        self.sleep_min = 0.1
+        self.sleep_max = 0.5
 
     def _log_error (self, error_code, site_id, message):
         error_data = {
@@ -58,7 +63,7 @@ class DarkwebSpyder:
 
             target_list = []
             seen_domain = set()
-            seen_names = set()
+
 
             for line in resp.text.splitlines():
                 
@@ -71,19 +76,20 @@ class DarkwebSpyder:
                         forum_url = match.group(2).strip()
                         
                         if forum_url.startswith("http"):
-                            domain = forum_url.split("/")[2]
 
-                            if domain in seen_domain:
+                            parsed_url = urlparse(forum_url)
+                            domain = parsed_url.netloc.lower()
+
+
+                            domain = domain.split(':')[0]
+                            if domain.startswith("www."):
+                                domain = domain[4:]
+
+
+                            if not domain or domain in seen_domain:
                                 continue
                             
-                            core_name = re.sub(r'\(.*?\)', '', name).lower()
-                            core_name = re.sub(r'[^a-z0-9]', '', core_name)
-
-                            if core_name in seen_names:
-                                continue
-
                             seen_domain.add(domain)
-                            seen_names.add(core_name)
 
                             target_list.append({
                                 "name" : name,
@@ -170,27 +176,35 @@ class DarkwebSpyder:
 
     def send_to_backend(self, post_url, domain, html):
             
-            target_url = "https://unpercipient-woodrow-nonrecurent.ngrok-free.dev/api/v1/ingestion/data"
-            
+            target_url = os.getenv("NGROK_INGESTION_URL")
+
+            soup = BeautifulSoup(html, 'html.parser')
+            page_title = soup.title.string.strip() if soup.title and soup.title.string else "제목 없음"
+
             headers = {
-                "ngrok-skip-browser-warning": "69420" 
+                "ngrok-skip-browser-warning": "69420",
+                "X-API-KEY": os.getenv("API_INGESTION_KEY"),
+                "Content-Type": "application/json"
             }
             
             payload = {
+                "siteId": 1,
+                "title": page_title, 
                 "indicatorValue": post_url,
                 "sourceName": domain,
-                "rawContent": html[:5000]
+                "rawText": html[:5000], 
+                "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
             try:
                 
-                response = requests.post(target_url, json=payload, headers=headers, timeout=10)
+                response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                 if response.status_code == 200:
                     print("전송 성공")
-
+                else:
+                    print(f"전송 실패 (상태 코드: {response.status_code})")
             except Exception as e:
-                print("전송 에러")
-
+                print(f"전송 에러: {e}")
 
                 
 

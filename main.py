@@ -3,8 +3,8 @@ import time
 import json
 import logging
 import os
+from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
 from core.sender import DataSender
 from core.schemas import RawCollectedData
@@ -20,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger("DarkTrace_Main")
 
 DEFAULT_SITE_ID = 1
-MAX_WORKERS = 20
+MAX_WORKERS = 30
 HEARTBEAT_INTERVAL = 300
 
 
@@ -35,6 +35,12 @@ def memory_parser(domain, url, raw_html):
         total_scraped_count += 1
 
     try:
+        soup = BeautifulSoup(raw_html, 'html.parser')
+        page_title = soup.title.string.strip() if soup.title and soup.title.string else "제목 없음"
+    except:
+        page_title = "제목 없음"
+        
+    try:
         data = json.loads(raw_html)
         source = data.get("_source", {})
         u_id = source.get("username", "N/A")    
@@ -43,7 +49,13 @@ def memory_parser(domain, url, raw_html):
 
         formatted_text = f"ID: {u_id} | Email: {u_email} | PW: {u_pw}"
 
-        api_sender.send_raw_data(site_id=1, raw_text=formatted_text)
+        api_sender.send_raw_data(
+            site_id=DEFAULT_SITE_ID, 
+            title=page_title, 
+            indicator_value=url, 
+            source_name=domain, 
+            raw_text=formatted_text
+        )
 
         if total_scraped_count % 100 == 0:
             logger.info(f"누적 {total_scraped_count}개 수집 및 전송 완료")
@@ -53,14 +65,26 @@ def memory_parser(domain, url, raw_html):
         try:
             raw_data = RawCollectedData(site_id=DEFAULT_SITE_ID, raw_text=raw_html)
             parser = DataParser(site_id=DEFAULT_SITE_ID)
+
             parsed_data = parser.parse_html(raw_data)
 
-            api_sender.send_raw_data(site_id=DEFAULT_SITE_ID, raw_text=parsed_data.clean_content)
-
+            api_sender.send_raw_data(
+                site_id=DEFAULT_SITE_ID, 
+                title=page_title, 
+                indicator_value=url, 
+                source_name=domain, 
+                raw_text=parsed_data.clean_content
+            )
         except Exception as parse_e:
             logger.error(f"HTML 파싱 오류 ({url}): {parse_e}")
 
-            api_sender.send_raw_data(site_id=DEFAULT_SITE_ID, raw_text=raw_html)
+            api_sender.send_raw_data(
+                site_id=DEFAULT_SITE_ID, 
+                title=page_title, 
+                indicator_value=url, 
+                source_name=domain, 
+                raw_text=raw_html
+            )
 
         if total_scraped_count % 100 == 0:
             logger.info(f"누적 {total_scraped_count}개 수집 및 정제 전송 완료")
@@ -99,8 +123,7 @@ def run_spider():
         logger.warning("타겟을 찾을 수 없습니다. (GitHub 리스트 확인)")
         return
     
-    logger.info(f"확보된 고유 타겟: {len(targets)}개 (20개 스레드 투입)")
-
+    logger.info(f"확보된 고유 타겟: {len(targets)}개 ({MAX_WORKERS}개 스레드 투입)")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(process_target, target) for target in targets]
         for future in as_completed(futures):
