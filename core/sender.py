@@ -34,10 +34,18 @@ class DataSender:
 
         try:
             resp = self.session.post(url, json=payload, timeout=30)
-            if resp.status_code != 200:
+
+            try:
+                resp_json = resp.json()
+            except ValueError:
+                resp_json = {}
+
+            if resp.status_code == 200 and resp_json.get("code") == "SUCCESS":
+                return True
+            else:
                 logger.warning(f"[API 8번 전송 실패] 서버 응답 코드: {resp.status_code}")
                 return False
-            return True
+            
         
         except Exception as e:
             logger.error(f"[API 8번 연결 에러] 백엔드 연결 불가: {e}")

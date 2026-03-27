@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import os
+from datetime import datetime
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collectors.darkweb_spyder_v2 import DarkwebSpyder
@@ -139,8 +140,13 @@ if __name__ == "__main__":
     daemon_thread.start()
 
     try:
-        run_spider() 
+        while True: 
+            logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 새 수집 사이클을 시작")
+            run_spider() 
+            logger.info("모든 타겟 스캔 완료. 10분간 sleep 후 다시 시작")
+            time.sleep(600)
+
     except KeyboardInterrupt:
-        logger.warning("사용자에 의해 스캔이 강제 종료되었습니다.")
+        logger.warning("사용자에 의해 스캔이 강제 종료되었습니다")
         api_sender.send_engine_status(site_id=DEFAULT_SITE_ID, source_name="DarkTrace_Main", status="DEAD")
         os._exit(1)

@@ -5,8 +5,6 @@ import requests
 import random
 import re
 import json
-from datetime import datetime
-from dotenv import load_dotenv
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
@@ -35,8 +33,8 @@ class DarkwebSpyder:
         self.callback = callback
 
         self.max_seen_urls = 10000
-        self.sleep_min = 0.1
-        self.sleep_max = 0.5
+        self.sleep_min = 2.0
+        self.sleep_max = 5.0
 
     def _log_error (self, error_code, site_id, message):
         error_data = {
@@ -44,7 +42,7 @@ class DarkwebSpyder:
             "site_id": site_id,
             "message": message
         }
-        print(f"[ERROR] {message}")
+        
         logger.error(json.dumps(error_data, ensure_ascii=False))
 
     def setup_target(self, domain, is_onion):
@@ -174,37 +172,6 @@ class DarkwebSpyder:
         except Exception as e:
             self._log_error("E002", domain, f"게시판 스크래핑 실패: {str(e)}")
 
-    def send_to_backend(self, post_url, domain, html):
-            
-            target_url = os.getenv("NGROK_INGESTION_URL")
-
-            soup = BeautifulSoup(html, 'html.parser')
-            page_title = soup.title.string.strip() if soup.title and soup.title.string else "제목 없음"
-
-            headers = {
-                "ngrok-skip-browser-warning": "69420",
-                "X-API-KEY": os.getenv("API_INGESTION_KEY"),
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "siteId": 1,
-                "title": page_title, 
-                "indicatorValue": post_url,
-                "sourceName": domain,
-                "rawText": html[:5000], 
-                "collectedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            try:
-                
-                response = requests.post(target_url, json=payload, headers=headers, timeout=30)
-                if response.status_code == 200:
-                    print("전송 성공")
-                else:
-                    print(f"전송 실패 (상태 코드: {response.status_code})")
-            except Exception as e:
-                print(f"전송 에러: {e}")
 
                 
 
